@@ -53,6 +53,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      // Skip ngrok free-tier's browser-warning interstitial (which strips CORS headers)
+      // when the gateway is exposed via an ngrok URL. Harmless on any other host.
+      "ngrok-skip-browser-warning": "true",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(init.headers ?? {}),
     },
@@ -297,6 +300,7 @@ export async function* chatStream(input: {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      "ngrok-skip-browser-warning": "true",
       ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
     },
     body: JSON.stringify(input),
@@ -337,7 +341,10 @@ export async function uploadDocument(file: File): Promise<DocumentItem> {
   form.append("file", file);
   const resp = await fetch(`${API_URL}/api/knowledge/documents`, {
     method: "POST",
-    headers: { ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}) },
+    headers: {
+      "ngrok-skip-browser-warning": "true",
+      ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {}),
+    },
     body: form, // browser sets multipart boundary
   });
   if (!resp.ok) throw new ApiError("Upload failed", resp.status);

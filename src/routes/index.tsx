@@ -12,6 +12,8 @@ import {
   Coins,
   Cpu,
   CreditCard,
+  Eye,
+  EyeOff,
   FileText,
   Gauge,
   Landmark,
@@ -2622,6 +2624,43 @@ function Field({
 const inputCls =
   "w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-1 focus:ring-primary";
 
+// Password input with a show/hide (eye) toggle.
+function PasswordInput({
+  value,
+  onChange,
+  placeholder,
+  autoComplete,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  autoComplete?: string;
+}) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={show ? "text" : "password"}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={cn(inputCls, "pr-10")}
+        placeholder={placeholder}
+        autoComplete={autoComplete}
+      />
+      <button
+        type="button"
+        onClick={() => setShow((s) => !s)}
+        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground transition hover:text-foreground"
+        aria-label={show ? "Hide password" : "Show password"}
+        title={show ? "Hide password" : "Show password"}
+        tabIndex={-1}
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
+}
+
 function isEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
 }
@@ -2676,11 +2715,9 @@ function LoginForm({
         />
       </Field>
       <Field label="Password" error={errors.password}>
-        <input
-          type="password"
+        <PasswordInput
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className={inputCls}
+          onChange={setPassword}
           placeholder="••••••••"
           autoComplete="current-password"
         />
@@ -2790,11 +2827,9 @@ function SignupForm({
         />
       </Field>
       <Field label="Password" error={errors.password}>
-        <input
-          type="password"
+        <PasswordInput
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className={inputCls}
+          onChange={setPassword}
           placeholder="At least 8 characters"
           autoComplete="new-password"
         />
