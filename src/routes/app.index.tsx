@@ -13,6 +13,8 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { useAuditEvents, useDocuments, useSystemHealth } from "../api";
+import { EmptyState, LoadingState } from "../components/common/states";
 import { useSession } from "../lib/session";
 import { cn } from "../lib/utils";
 
@@ -57,37 +59,28 @@ const CLOSE_TASKS: { label: string; done: number; total: number }[] = [
   { label: "Balance-sheet review", done: 4, total: 9 },
 ];
 
-const RECENT_DOCS: { name: string; type: string; status: string; tone: Tone; date: string; icon: LucideIcon }[] = [
-  { name: "Invoice #AC-2214 — Acme Supplies", type: "Invoice", status: "Needs Approval", tone: "warn", date: "Jul 08", icon: ReceiptText },
-  { name: "Bank Statement — Mercury (Jun)", type: "Statement", status: "Reconciling", tone: "neutral", date: "Jul 01", icon: Landmark },
-  { name: "Purchase Order PO-4482 — Nucor", type: "PO", status: "Approved", tone: "good", date: "Jun 22", icon: ClipboardCheck },
-  { name: "Invoice #GX-2231 — Globex Corp", type: "Invoice", status: "Duplicate Flagged", tone: "bad", date: "Jul 09", icon: ReceiptText },
-  { name: "Expense Report — Q3 Sales Offsite", type: "Expense", status: "Needs Approval", tone: "warn", date: "Jul 06", icon: FileText },
-];
-
-const ACTIVITY: { action: string; actor: string; detail: string; time: string }[] = [
-  { action: "Invoice posted", actor: "AP Copilot", detail: "AC-2198 → QuickBooks", time: "10:42" },
-  { action: "Approval granted", actor: "A. Reyes", detail: "Reconciliation · June", time: "10:15" },
-  { action: "Duplicate flagged", actor: "AP Copilot", detail: "Invoice GX-2231", time: "09:58" },
-  { action: "Bank feed synced", actor: "System", detail: "Mercury ••4102", time: "09:30" },
-  { action: "Expense audited", actor: "Audit Copilot", detail: "Q3 Sales Offsite", time: "09:12" },
-  { action: "Vendor onboarded", actor: "R. Danforth", detail: "Nucor Steel · W-9 verified", time: "08:47" },
-];
-
-const SERVICES: { name: string; status: string; tone: Tone }[] = [
-  { name: "QuickBooks", status: "operational", tone: "good" },
-  { name: "Mercury Bank", status: "operational", tone: "good" },
-  { name: "Document AI", status: "operational", tone: "good" },
-  { name: "Orchestrator", status: "operational", tone: "good" },
-  { name: "NetSuite", status: "degraded", tone: "warn" },
-  { name: "Audit Log", status: "operational", tone: "good" },
-];
+// Derive a display tone from a free-form backend status string.
+function statusTone(status: string): Tone {
+  const s = status.toLowerCase();
+  if (/(operational|healthy|ok|up|approved|processed|complete|ready|active|success)/.test(s)) return "good";
+  if (/(degraded|pending|processing|reconciling|review|queued|warn|needs)/.test(s)) return "warn";
+  if (/(down|error|failed|fail|duplicate|unhealthy|offline|bad)/.test(s)) return "bad";
+  return "neutral";
+}
 
 /* ─────────────────────────  Page  ───────────────────────── */
 
 function Dashboard() {
   const { me } = useSession();
   const name = me?.email ? me.email.split("@")[0] : "there";
+
+  const health = useSystemHealth();
+  const docs = useDocuments();
+  const activity = useAuditEvents("dashboard", 6);
+
+  const services = Object.entries(health.data?.services ?? {});
+  const recentDocs = (docs.data ?? []).slice(0, 5);
+  const events = activity.data ?? [];
 
   return (
     <div className="space-y-7">
@@ -143,78 +136,100 @@ function Dashboard() {
           </div>
         </Panel>
 
-        <Panel icon={Activity} title="Activity" hint="today">
-          <ul className="divide-y divide-border">
-            {ACTIVITY.map((a, i) => (
-              <li key={i} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                <div className="min-w-0">
-                  <div className="truncate font-medium text-foreground">{a.action}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {a.actor} · {a.detail}
+        <Panel icon={Activity} title="Activity" hint="recent">
+          {activity.isLoading ? (
+            <LoadingState />
+          ) : events.length === 0 ? (
+            <EmptyState icon={Activity} title="No recent activity" />
+          ) : (
+            <ul className="divide-y divide-border">
+              {events.map((a) => (
+                <li key={a.id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium text-foreground">{a.action}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {a.actor_email ?? a.actor_id} · {a.resource_kind}
+                    </div>
                   </div>
-                </div>
-                <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.time}</span>
-              </li>
-            ))}
-          </ul>
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                    {new Date(a.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Panel>
       </div>
 
       {/* Recent documents */}
-      <Panel icon={FileText} title="Recent documents" hint={`${RECENT_DOCS.length} items`}>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="pb-2 font-medium">Document</th>
-                <th className="pb-2 font-medium">Type</th>
-                <th className="pb-2 font-medium">Status</th>
-                <th className="pb-2 text-right font-medium">Date</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {RECENT_DOCS.map((d) => {
-                const Icon = d.icon;
-                return (
-                  <tr key={d.name} className="transition-colors hover:bg-surface-2/50">
+      <Panel icon={FileText} title="Recent documents" hint={`${recentDocs.length} items`}>
+        {docs.isLoading ? (
+          <LoadingState />
+        ) : recentDocs.length === 0 ? (
+          <EmptyState icon={FileText} title="No documents yet" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="pb-2 font-medium">Document</th>
+                  <th className="pb-2 font-medium">Type</th>
+                  <th className="pb-2 font-medium">Status</th>
+                  <th className="pb-2 text-right font-medium">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {recentDocs.map((d) => (
+                  <tr key={d.id} className="transition-colors hover:bg-surface-2/50">
                     <td className="py-2.5">
                       <div className="flex items-center gap-2.5">
-                        <Icon className="h-4 w-4 shrink-0 text-primary" />
-                        <span className="font-medium">{d.name}</span>
+                        <FileText className="h-4 w-4 shrink-0 text-primary" />
+                        <span className="font-medium">{d.filename}</span>
                       </div>
                     </td>
-                    <td className="py-2.5 text-muted-foreground">{d.type}</td>
+                    <td className="py-2.5 text-muted-foreground">{d.content_type ?? "—"}</td>
                     <td className="py-2.5">
-                      <StatusPill tone={d.tone}>{d.status}</StatusPill>
+                      <StatusPill tone={statusTone(d.status)}>{d.status}</StatusPill>
                     </td>
-                    <td className="py-2.5 text-right text-muted-foreground">{d.date}</td>
+                    <td className="py-2.5 text-right text-muted-foreground">
+                      {new Date(d.created_at).toLocaleDateString()}
+                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </Panel>
 
       {/* Connected services */}
       <Panel icon={Cable} title="Connected services" hint="live status">
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {SERVICES.map((s) => (
-            <div
-              key={s.name}
-              className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2.5"
-            >
-              <span className="truncate text-sm">{s.name}</span>
-              <span
-                className={cn(
-                  "h-2 w-2 shrink-0 rounded-full",
-                  s.tone === "good" ? "bg-emerald-500" : s.tone === "warn" ? "bg-amber-500" : "bg-muted-foreground",
-                )}
-                title={s.status}
-              />
-            </div>
-          ))}
-        </div>
+        {health.isLoading ? (
+          <LoadingState />
+        ) : services.length === 0 ? (
+          <EmptyState icon={Cable} title="No services reporting" />
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {services.map(([name, status]) => {
+              const tone = statusTone(status);
+              return (
+                <div
+                  key={name}
+                  className="flex items-center justify-between rounded-xl border border-border bg-surface px-3 py-2.5"
+                >
+                  <span className="truncate text-sm">{name}</span>
+                  <span
+                    className={cn(
+                      "h-2 w-2 shrink-0 rounded-full",
+                      tone === "good" ? "bg-emerald-500" : tone === "warn" ? "bg-amber-500" : "bg-muted-foreground",
+                    )}
+                    title={status}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Panel>
     </div>
   );

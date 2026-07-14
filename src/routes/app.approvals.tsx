@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CheckCircle2, ClipboardCheck, Clock, ShieldCheck, XCircle } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { useDecideWorkflow, useWorkflows, type WorkflowItem } from "../api";
+import { EmptyState, ErrorState, LoadingState } from "../components/common/states";
 import { useSession } from "../lib/session";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/approvals")({ component: Approvals });
 
-/* ─────────────────────────  Dummy data  ───────────────────────── */
+/* ─────────────────────────  Types & mapping  ───────────────────────── */
 
 type Decision = "approved" | "rejected";
 
@@ -25,76 +27,36 @@ type ApprovalItem = {
   checks: { label: string; ok: boolean }[];
 };
 
-const INITIAL: ApprovalItem[] = [
-  {
-    id: "wf_invoice_0417",
-    type: "AP Invoice Approval",
-    title: "Invoice #AC-2214 — Acme Supplies",
-    amount: "$14,280.00",
-    requester: "AP Copilot",
-    approver: "Controller",
-    waited: "18m",
-    priority: "medium",
-    summary:
-      "3-way match against PO-2214 and goods receipt succeeded. Freight of $1,180.00 was not on the original PO and should be confirmed as billable before posting.",
-    checks: [
-      { label: "3-way match", ok: true },
-      { label: "Duplicate check", ok: true },
-      { label: "Freight on PO", ok: false },
-    ],
-  },
-  {
-    id: "wf_expense_118",
-    type: "Expense Report",
-    title: "Q3 Sales Offsite — 6 attendees",
-    amount: "$3,914.72",
-    requester: "R. Danforth",
-    approver: "Finance Manager",
-    waited: "42m",
+/** A workflow is awaiting a human decision when it has no decision yet and is in a pending-ish state. */
+function isPendingApproval(w: WorkflowItem): boolean {
+  if (w.decision) return false;
+  const s = w.status.toLowerCase();
+  return s.includes("pending") || s.includes("await") || s.includes("review");
+}
+
+function timeAgo(iso: string): string {
+  const mins = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ${String(mins % 60).padStart(2, "0")}m`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
+/** Map a real workflow onto the approval card fields; anything not tracked by the backend shows "—". */
+function toApprovalItem(w: WorkflowItem): ApprovalItem {
+  return {
+    id: w.workflow_id,
+    type: w.type || "—",
+    title: w.summary || "—",
+    amount: "—",
+    requester: "—",
+    approver: "—",
+    waited: timeAgo(w.created_at),
     priority: "low",
-    summary:
-      "18 of 19 line items passed the automated policy check. One lodging night of $312.00 exceeds the $250 nightly cap and needs a justification.",
-    checks: [
-      { label: "Receipts attached", ok: true },
-      { label: "Duplicate claims", ok: true },
-      { label: "Within policy", ok: false },
-    ],
-  },
-  {
-    id: "wf_bankrec_jun",
-    type: "Bank Reconciliation",
-    title: "Mercury Operating — June close",
-    amount: "$482,190.11",
-    requester: "Recon Copilot",
-    approver: "Controller",
-    waited: "1h 05m",
-    priority: "high",
-    summary:
-      "398 of 412 transactions auto-matched (96.6%). Two fee journal entries are proposed and 14 exceptions are grouped and explained, ready to clear.",
-    checks: [
-      { label: "Balance ties out", ok: true },
-      { label: "Exceptions grouped", ok: true },
-      { label: "Fee entries proposed", ok: true },
-    ],
-  },
-  {
-    id: "wf_vendor_globex",
-    type: "Vendor Payment",
-    title: "Invoice #GX-2231 — Globex Corp",
-    amount: "$6,540.00",
-    requester: "AP Copilot",
-    approver: "Controller",
-    waited: "2h 12m",
-    priority: "high",
-    summary:
-      "Flagged as a likely duplicate of GX-2198 (paid Jun 28). Held from the payment run — approve only after confirming with the vendor, otherwise reject.",
-    checks: [
-      { label: "Vendor verified", ok: true },
-      { label: "Not a duplicate", ok: false },
-      { label: "Within terms", ok: true },
-    ],
-  },
-];
+    summary: w.summary || "—",
+    checks: [],
+  };
+}
 
 const PRIORITY_META: Record<ApprovalItem["priority"], { label: string; cls: string }> = {
   high: { label: "High", cls: "bg-destructive/10 border-destructive/30 text-destructive" },
@@ -106,11 +68,17 @@ const PRIORITY_META: Record<ApprovalItem["priority"], { label: string; cls: stri
 
 function Approvals() {
   const { isManager } = useSession();
-  const [items, setItems] = useState(INITIAL);
+  const workflows = useWorkflows();
+  const decide = useDecideWorkflow();
   const [decided, setDecided] = useState<{ item: ApprovalItem; decision: Decision }[]>([]);
 
-  const decide = (item: ApprovalItem, decision: Decision) => {
-    setItems((cur) => cur.filter((i) => i.id !== item.id));
+  const items = useMemo(
+    () => (workflows.data ?? []).filter(isPendingApproval).map(toApprovalItem),
+    [workflows.data],
+  );
+
+  const onDecide = (item: ApprovalItem, decision: Decision, comment: string) => {
+    decide.mutate({ workflowId: item.id, approve: decision === "approved", comment });
     setDecided((cur) => [{ item, decision }, ...cur]);
   };
 
@@ -155,20 +123,26 @@ function Approvals() {
       )}
 
       {/* Queue */}
-      {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
-          <div className="grid h-11 w-11 place-items-center rounded-full bg-emerald-500/10 text-emerald-500">
-            <CheckCircle2 className="h-5 w-5" />
-          </div>
-          <div>
-            <p className="text-sm font-medium text-foreground">You're all caught up</p>
-            <p className="mt-1 text-sm text-muted-foreground">Nothing is waiting for approval.</p>
-          </div>
-        </div>
+      {workflows.isLoading ? (
+        <LoadingState />
+      ) : workflows.error ? (
+        <ErrorState onRetry={() => workflows.refetch()} />
+      ) : items.length === 0 ? (
+        <EmptyState
+          icon={CheckCircle2}
+          title="No pending approvals"
+          description="Nothing is waiting for approval."
+        />
       ) : (
         <div className="grid gap-3">
           {items.map((item) => (
-            <ApprovalCard key={item.id} item={item} canDecide={isManager} onDecide={decide} />
+            <ApprovalCard
+              key={item.id}
+              item={item}
+              canDecide={isManager}
+              pending={decide.isPending}
+              onDecide={onDecide}
+            />
           ))}
         </div>
       )}
@@ -240,11 +214,13 @@ function Tile({
 function ApprovalCard({
   item,
   canDecide,
+  pending,
   onDecide,
 }: {
   item: ApprovalItem;
   canDecide: boolean;
-  onDecide: (item: ApprovalItem, decision: Decision) => void;
+  pending: boolean;
+  onDecide: (item: ApprovalItem, decision: Decision, comment: string) => void;
 }) {
   const [comment, setComment] = useState("");
   const pr = PRIORITY_META[item.priority];
@@ -318,14 +294,16 @@ function ApprovalCard({
           />
           <div className="flex gap-2">
             <button
-              onClick={() => onDecide(item, "approved")}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90"
+              onClick={() => onDecide(item, "approved", comment)}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3.5 py-1.5 text-sm font-semibold text-primary-foreground transition hover:opacity-90 disabled:opacity-60"
             >
               <CheckCircle2 className="h-4 w-4" /> Approve
             </button>
             <button
-              onClick={() => onDecide(item, "rejected")}
-              className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-1.5 text-sm font-semibold text-destructive transition hover:bg-destructive/20"
+              onClick={() => onDecide(item, "rejected", comment)}
+              disabled={pending}
+              className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 bg-destructive/10 px-3.5 py-1.5 text-sm font-semibold text-destructive transition hover:bg-destructive/20 disabled:opacity-60"
             >
               <XCircle className="h-4 w-4" /> Reject
             </button>

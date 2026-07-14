@@ -11,12 +11,17 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { api } from "../api";
+import { ApiError, api } from "../api";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/assistant")({ component: Assistant });
 
-type Msg = { role: "user" | "assistant"; content: string };
+type Msg = { role: "user" | "assistant"; content: string; error?: boolean };
+
+// Offline demo switch: when true, a canned reply is streamed if the backend can't be
+// reached — for showing the UI with no backend. Keep FALSE in real use so genuine
+// backend/LLM failures surface as errors instead of being masked by a fake answer.
+const OFFLINE_DEMO = false;
 
 const SUGGESTED: { icon: LucideIcon; label: string }[] = [
   { icon: FileSearch, label: "Summarize my most recent document." },
@@ -118,7 +123,15 @@ function Assistant() {
       return copy;
     });
 
-  // Stream a canned answer word-by-word for a realistic typing feel.
+  // Replace the (empty) trailing assistant bubble with a clear, visible error notice.
+  const showError = (msg: string) =>
+    setMessages((m) => {
+      const copy = [...m];
+      copy[copy.length - 1] = { role: "assistant", content: `⚠️ ${msg}`, error: true };
+      return copy;
+    });
+
+  // Stream a canned answer word-by-word (offline demo only — see OFFLINE_DEMO).
   const streamDummy = async (full: string) => {
     const tokens = full.match(/\S+\s*/g) ?? [full];
     for (const t of tokens) {
@@ -138,26 +151,42 @@ function Assistant() {
     ]);
     setStreaming(true);
 
+    let errorMsg = "";
     try {
       let got = false;
       for await (const chunk of api.chatStream({
         message,
         session_id: sessionId.current,
         use_rag: useRag,
+        workspace: "accounting", // this is the Accounting workspace
       })) {
         if (chunk.session_id) sessionId.current = chunk.session_id;
+        if (chunk.error) {
+          errorMsg = chunk.error; // backend signalled a failure (e.g. LLM unavailable)
+          break;
+        }
         if (chunk.delta) {
           got = true;
           appendToLast(chunk.delta);
         }
       }
-      // Backend reachable but returned nothing → fall back to a dummy reply.
-      if (!got) await streamDummy(dummyReply(message, useRag));
-    } catch {
-      // No backend (prototype) → simulate a response so the demo always works.
-      await streamDummy(dummyReply(message, useRag));
+      if (!got && !errorMsg) {
+        errorMsg = "The assistant didn't return a response. Please try again.";
+      }
+    } catch (e) {
+      errorMsg =
+        e instanceof ApiError
+          ? `The assistant is unavailable (${e.status}). Please try again shortly.`
+          : "Couldn't reach the assistant. Check your connection and try again.";
     } finally {
       setStreaming(false);
+    }
+
+    if (errorMsg) {
+      // Real backend failure: surface it — never silently fake an answer. (Flip
+      // OFFLINE_DEMO to true only to demo the UI with a canned reply when there is no backend.)
+      if (OFFLINE_DEMO) await streamDummy(dummyReply(message, useRag));
+      else showError(errorMsg);
     }
   };
 
@@ -220,7 +249,9 @@ function Assistant() {
                     "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
                     m.role === "user"
                       ? "rounded-tr-sm bg-primary text-primary-foreground"
-                      : "rounded-tl-sm border border-border bg-card text-foreground",
+                      : m.error
+                        ? "rounded-tl-sm border border-destructive/40 bg-destructive/10 text-destructive"
+                        : "rounded-tl-sm border border-border bg-card text-foreground",
                   )}
                 >
                   {m.content ? (

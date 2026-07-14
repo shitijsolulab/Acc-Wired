@@ -1,198 +1,39 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   CheckCircle2,
-  ChevronRight,
   ClipboardCheck,
   Loader2,
-  Plug,
   Workflow as WorkflowIcon,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Fragment, useState } from "react";
 
+import { useWorkflows } from "../api";
+import { EmptyState, LoadingState } from "../components/common/states";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/workflows")({ component: Workflows });
 
-/* ─────────────────────────  Types + dummy data  ───────────────────────── */
+/* ─────────────────────────  Status styling  ───────────────────────── */
 
-type WfStatus = "running" | "awaiting_approval" | "completed" | "failed";
-type StepKind = "trigger" | "extract" | "match" | "validate" | "approve" | "output";
-
-type Step = { label: string; system: string; kind: StepKind; failed?: boolean };
-
-type Row = {
-  id: string;
-  name: string;
-  status: WfStatus;
-  waiting: string;
-  decision: string | null;
-  started: string;
-  updated: string;
-  flow: Step[];
-};
-
-const ROWS: Row[] = [
-  {
-    id: "wf_invoice_0417",
-    name: "Invoice Processing & AP Approval",
-    status: "awaiting_approval",
-    waiting: "Controller approval",
-    decision: null,
-    started: "Jul 13, 2026 09:41",
-    updated: "Jul 13, 2026 09:44",
-    flow: [
-      { label: "Invoice arrives", system: "AP Inbox", kind: "trigger" },
-      { label: "Extract line items", system: "Document AI", kind: "extract" },
-      { label: "3-way match", system: "QuickBooks", kind: "match" },
-      { label: "GL coding + policy", system: "Rules Engine", kind: "validate" },
-      { label: "Controller approval", system: "Approvals", kind: "approve" },
-      { label: "Post journal entry", system: "QuickBooks", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_bankrec_jun",
-    name: "Bank Reconciliation — June",
-    status: "running",
-    waiting: "—",
-    decision: null,
-    started: "Jul 13, 2026 09:30",
-    updated: "Jul 13, 2026 09:52",
-    flow: [
-      { label: "Bank feed syncs", system: "Mercury Bank", kind: "trigger" },
-      { label: "Pull transactions", system: "Bank Feed", kind: "extract" },
-      { label: "Auto-match ledger", system: "Core Banking", kind: "match" },
-      { label: "Group exceptions", system: "Recon Engine", kind: "validate" },
-      { label: "Controller approval", system: "Approvals", kind: "approve" },
-      { label: "Close reconciliation", system: "Ledger", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_close_jul",
-    name: "Month-End Close — July",
-    status: "running",
-    waiting: "—",
-    decision: null,
-    started: "Jul 13, 2026 08:00",
-    updated: "Jul 13, 2026 09:58",
-    flow: [
-      { label: "Kick off close", system: "Scheduler", kind: "trigger" },
-      { label: "Work checklist", system: "Close Engine", kind: "extract" },
-      { label: "Prepare accruals", system: "NetSuite", kind: "match" },
-      { label: "Reconcile accounts", system: "Core Banking", kind: "validate" },
-      { label: "CFO approval", system: "Approvals", kind: "approve" },
-      { label: "Lock period", system: "Ledger", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_ar_dunning",
-    name: "AR Collections & Dunning",
-    status: "completed",
-    waiting: "—",
-    decision: "approved",
-    started: "Jul 12, 2026 16:20",
-    updated: "Jul 12, 2026 16:22",
-    flow: [
-      { label: "Invoice overdue", system: "QuickBooks", kind: "trigger" },
-      { label: "Rank by risk", system: "AR Engine", kind: "extract" },
-      { label: "Reconcile payments", system: "Bank Feed", kind: "match" },
-      { label: "Draft reminders", system: "Document AI", kind: "validate" },
-      { label: "Controller approval", system: "Approvals", kind: "approve" },
-      { label: "Queue emails", system: "CRM", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_expense_118",
-    name: "Expense Audit — Q3 Sales Offsite",
-    status: "awaiting_approval",
-    waiting: "Finance Manager approval",
-    decision: null,
-    started: "Jul 13, 2026 09:12",
-    updated: "Jul 13, 2026 09:13",
-    flow: [
-      { label: "Expense submitted", system: "Expense Tool", kind: "trigger" },
-      { label: "Read receipts", system: "Document AI", kind: "extract" },
-      { label: "Policy check", system: "Rules Engine", kind: "validate" },
-      { label: "Finance approval", system: "Approvals", kind: "approve" },
-      { label: "Reimburse", system: "Payroll", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_vendor_nucor",
-    name: "Vendor Onboarding & W-9 — Nucor",
-    status: "completed",
-    waiting: "—",
-    decision: "approved",
-    started: "Jun 22, 2026 11:05",
-    updated: "Jun 22, 2026 11:18",
-    flow: [
-      { label: "New vendor request", system: "Email", kind: "trigger" },
-      { label: "Read W-9", system: "Document AI", kind: "extract" },
-      { label: "Validate TIN + sanctions", system: "Compliance", kind: "validate" },
-      { label: "Finance approval", system: "Approvals", kind: "approve" },
-      { label: "Create vendor record", system: "NetSuite", kind: "output" },
-    ],
-  },
-  {
-    id: "wf_salestax_q2",
-    name: "Sales Tax & Compliance — Q2",
-    status: "failed",
-    waiting: "—",
-    decision: "rejected",
-    started: "Jul 10, 2026 14:02",
-    updated: "Jul 10, 2026 14:20",
-    flow: [
-      { label: "Filing deadline", system: "Scheduler", kind: "trigger" },
-      { label: "Review nexus", system: "NetSuite", kind: "extract" },
-      { label: "Recalculate tax", system: "Tax Engine", kind: "match" },
-      { label: "Prepare return", system: "Document AI", kind: "validate" },
-      { label: "Controller approval", system: "Approvals", kind: "approve" },
-      { label: "File return", system: "Tax Portal", kind: "output", failed: true },
-    ],
-  },
-  {
-    id: "wf_report_jun",
-    name: "Financial Reporting — June",
-    status: "completed",
-    waiting: "—",
-    decision: "approved",
-    started: "Jul 01, 2026 07:30",
-    updated: "Jul 01, 2026 07:35",
-    flow: [
-      { label: "Select period", system: "Dashboard", kind: "trigger" },
-      { label: "Pull actuals + budget", system: "NetSuite", kind: "extract" },
-      { label: "Build statements", system: "Reporting Engine", kind: "match" },
-      { label: "Variance commentary", system: "Document AI", kind: "validate" },
-      { label: "CFO approval", system: "Approvals", kind: "approve" },
-      { label: "Publish report", system: "Reporting", kind: "output" },
-    ],
-  },
-];
-
-const STATUS_META: Record<WfStatus, { label: string; cls: string }> = {
+// Keyed by known status strings, with a neutral fallback so unrecognized
+// statuses from the backend still render safely.
+const STATUS_META: Record<string, { label: string; cls: string }> = {
   running: { label: "Running", cls: "bg-sky-500/10 border-sky-500/30 text-sky-500" },
   awaiting_approval: { label: "Awaiting Approval", cls: "bg-amber-500/10 border-amber-500/30 text-amber-500" },
   completed: { label: "Completed", cls: "bg-emerald-500/10 border-emerald-500/30 text-emerald-500" },
   failed: { label: "Failed", cls: "bg-destructive/10 border-destructive/30 text-destructive" },
 };
 
-const KIND_META: Record<StepKind, { label: string; dot: string; ring: string; text: string }> = {
-  trigger: { label: "Trigger", dot: "bg-amber-400", ring: "border-amber-400/50", text: "text-amber-400" },
-  extract: { label: "Extract", dot: "bg-sky-400", ring: "border-sky-400/50", text: "text-sky-400" },
-  match: { label: "Match", dot: "bg-cyan-400", ring: "border-cyan-400/50", text: "text-cyan-400" },
-  validate: { label: "Validate", dot: "bg-violet-400", ring: "border-violet-400/50", text: "text-violet-400" },
-  approve: { label: "Approve", dot: "bg-indigo-400", ring: "border-indigo-400/50", text: "text-indigo-400" },
-  output: { label: "Output", dot: "bg-emerald-400", ring: "border-emerald-400/50", text: "text-emerald-400" },
-};
+const FALLBACK_STATUS_CLS = "bg-muted border-border text-muted-foreground";
 
 /* ─────────────────────────  Page  ───────────────────────── */
 
 function Workflows() {
-  const [expanded, setExpanded] = useState<string | null>(ROWS[0].id);
+  const { data: workflows = [], isLoading } = useWorkflows();
 
-  const running = ROWS.filter((r) => r.status === "running").length;
-  const pending = ROWS.filter((r) => r.status === "awaiting_approval").length;
-  const completed = ROWS.filter((r) => r.status === "completed").length;
+  const running = workflows.filter((w) => w.status === "running").length;
+  const pending = workflows.filter((w) => w.status === "awaiting_approval").length;
+  const completed = workflows.filter((w) => w.status === "completed").length;
 
   return (
     <div className="space-y-7">
@@ -216,200 +57,70 @@ function Workflows() {
         <Kpi icon={Loader2} label="Running" value={running} tone="text-sky-500" />
         <Kpi icon={ClipboardCheck} label="Awaiting Approval" value={pending} tone="text-amber-500" />
         <Kpi icon={CheckCircle2} label="Completed" value={completed} tone="text-emerald-500" />
-        <Kpi icon={WorkflowIcon} label="Total" value={ROWS.length} tone="text-foreground" />
+        <Kpi icon={WorkflowIcon} label="Total" value={workflows.length} tone="text-foreground" />
       </div>
 
-      {/* Table with expandable flow graphs */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                <th className="w-8 px-5 py-3" />
-                <th className="px-2 py-3 font-medium">Workflow</th>
-                <th className="px-5 py-3 font-medium">Status</th>
-                <th className="px-5 py-3 font-medium">Waiting For</th>
-                <th className="px-5 py-3 font-medium">Decision</th>
-                <th className="px-5 py-3 text-right font-medium">Last Updated</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {ROWS.map((r) => {
-                const meta = STATUS_META[r.status];
-                const open = expanded === r.id;
-                return (
-                  <Fragment key={r.id}>
-                    <tr
-                      onClick={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                      className={cn("cursor-pointer transition-colors hover:bg-surface-2/50", open && "bg-surface-2/40")}
-                    >
+      {/* Table */}
+      {isLoading ? (
+        <LoadingState label="Loading workflows…" />
+      ) : workflows.length === 0 ? (
+        <EmptyState
+          icon={WorkflowIcon}
+          title="No workflows yet"
+          description="Workflows will appear here as they run across your organization."
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-[11px] uppercase tracking-wider text-muted-foreground">
+                  <th className="px-5 py-3 font-medium">Workflow</th>
+                  <th className="px-5 py-3 font-medium">Status</th>
+                  <th className="px-5 py-3 font-medium">Waiting For</th>
+                  <th className="px-5 py-3 font-medium">Decision</th>
+                  <th className="px-5 py-3 text-right font-medium">Last Updated</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {workflows.map((w) => {
+                  const meta = STATUS_META[w.status];
+                  return (
+                    <tr key={w.workflow_id} className="transition-colors hover:bg-surface-2/50">
                       <td className="px-5 py-3">
-                        <ChevronRight
-                          className={cn("h-4 w-4 text-muted-foreground transition-transform", open && "rotate-90")}
-                        />
-                      </td>
-                      <td className="px-2 py-3">
-                        <div className="font-medium text-foreground">{r.name}</div>
-                        <div className="font-mono text-xs text-muted-foreground">{r.id}</div>
+                        <div className="font-medium text-foreground">{w.summary ?? w.type}</div>
+                        <div className="font-mono text-xs text-muted-foreground">{w.workflow_id}</div>
                       </td>
                       <td className="px-5 py-3">
                         <span
                           className={cn(
                             "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-medium",
-                            meta.cls,
+                            meta?.cls ?? FALLBACK_STATUS_CLS,
                           )}
                         >
-                          {r.status === "running" && <Loader2 className="h-3 w-3 animate-spin" />}
-                          {meta.label}
+                          {w.status === "running" && <Loader2 className="h-3 w-3 animate-spin" />}
+                          {meta?.label ?? w.status}
                         </span>
                       </td>
-                      <td className="px-5 py-3 text-muted-foreground">{r.waiting}</td>
+                      <td className="px-5 py-3 text-muted-foreground">—</td>
                       <td className="px-5 py-3">
-                        {r.decision ? (
-                          <span className="capitalize">{r.decision}</span>
+                        {w.decision ? (
+                          <span className="capitalize">{w.decision}</span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
                       <td className="px-5 py-3 text-right font-mono text-xs text-muted-foreground">
-                        {r.updated}
+                        {new Date(w.updated_at).toLocaleString()}
                       </td>
                     </tr>
-                    {open && (
-                      <tr className="bg-surface-2/20">
-                        <td colSpan={6} className="p-0">
-                          <WorkflowGraph flow={r.flow} />
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────  Per-workflow flow graph  ───────────────────────── */
-
-const STEP_W = 138;
-const STEP_H = 48;
-const SYS_W = 116;
-const SYS_H = 34;
-const STEP_Y = 70;
-const SYS_Y = 214;
-const PAD = 24;
-const STEP_GAP = 168;
-
-function WorkflowGraph({ flow }: { flow: Step[] }) {
-  // Step x-centers along the top lane.
-  const stepX = flow.map((_, i) => PAD + STEP_W / 2 + i * STEP_GAP);
-  const canvasW = PAD * 2 + STEP_W + (flow.length - 1) * STEP_GAP;
-
-  // Unique systems along the bottom lane.
-  const systems = Array.from(new Set(flow.map((s) => s.system)));
-  const sysX = (name: string) => {
-    const i = systems.indexOf(name);
-    if (systems.length === 1) return canvasW / 2;
-    const usable = canvasW - PAD * 2 - SYS_W;
-    return PAD + SYS_W / 2 + (i * usable) / (systems.length - 1);
-  };
-
-  const seqPath = (i: number) => {
-    const x1 = stepX[i] + STEP_W / 2;
-    const x2 = stepX[i + 1] - STEP_W / 2;
-    const dx = (x2 - x1) / 2;
-    return `M ${x1} ${STEP_Y} C ${x1 + dx} ${STEP_Y}, ${x2 - dx} ${STEP_Y}, ${x2} ${STEP_Y}`;
-  };
-  const downPath = (i: number, name: string) => {
-    const x1 = stepX[i];
-    const y1 = STEP_Y + STEP_H / 2;
-    const x2 = sysX(name);
-    const y2 = SYS_Y - SYS_H / 2;
-    const dy = (y2 - y1) / 2;
-    return `M ${x1} ${y1} C ${x1} ${y1 + dy}, ${x2} ${y2 - dy}, ${x2} ${y2}`;
-  };
-
-  const CANVAS_H = SYS_Y + SYS_H / 2 + 28;
-
-  return (
-    <div className="overflow-x-auto px-5 py-5">
-      <div className="relative" style={{ width: canvasW, height: CANVAS_H + 24 }}>
-        {/* lane labels */}
-        <div className="absolute left-0 top-0 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-          Flow
-        </div>
-        <div
-          className="absolute left-0 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground"
-          style={{ top: SYS_Y - SYS_H / 2 - 42 }}
-        >
-          Connectors
-        </div>
-
-        {/* edges */}
-        <svg className="absolute inset-0" width={canvasW} height={CANVAS_H + 24} fill="none">
-          {flow.slice(0, -1).map((_, i) => (
-            <path key={`seq-${i}`} d={seqPath(i)} className="stroke-amber-400/70" strokeWidth={1.75} />
-          ))}
-          {flow.map((s, i) => (
-            <path key={`down-${i}`} d={downPath(i, s.system)} className="stroke-amber-400/25" strokeWidth={1.25} />
-          ))}
-        </svg>
-
-        {/* step nodes */}
-        {flow.map((s, i) => {
-          const meta = KIND_META[s.kind];
-          return (
-            <div
-              key={`step-${i}`}
-              style={{ left: stepX[i] - STEP_W / 2, top: STEP_Y - STEP_H / 2, width: STEP_W, height: STEP_H }}
-              className={cn(
-                "absolute flex flex-col justify-center rounded-md border bg-card px-2.5 shadow-sm",
-                s.failed ? "border-destructive/60" : meta.ring,
-              )}
-            >
-              <div className="flex items-center gap-1.5">
-                <span className={cn("grid h-4 w-4 shrink-0 place-items-center rounded-full text-[9px] font-semibold text-background", meta.dot)}>
-                  {i + 1}
-                </span>
-                <span className="truncate text-[11px] font-semibold text-foreground">{s.label}</span>
-              </div>
-              <span className={cn("mt-0.5 pl-[22px] text-[9px] font-medium uppercase tracking-wide", s.failed ? "text-destructive" : meta.text)}>
-                {s.failed ? "failed" : meta.label}
-              </span>
-            </div>
-          );
-        })}
-
-        {/* system (connector) nodes */}
-        {systems.map((name) => (
-          <div
-            key={`sys-${name}`}
-            style={{ left: sysX(name) - SYS_W / 2, top: SYS_Y - SYS_H / 2, width: SYS_W, height: SYS_H }}
-            className="absolute flex items-center gap-1.5 rounded-md border border-orange-400/50 bg-card px-2.5 shadow-sm"
-          >
-            <Plug className="h-3 w-3 shrink-0 text-orange-400" />
-            <span className="truncate text-[11px] font-medium text-foreground">{name}</span>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </div>
-
-      {/* legend */}
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        {(Object.keys(KIND_META) as StepKind[]).map((k) => (
-          <span key={k} className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-            <span className={cn("h-2 w-2 rounded-full", KIND_META[k].dot)} />
-            {KIND_META[k].label}
-          </span>
-        ))}
-        <span className="flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
-          <span className="h-2 w-2 rounded-full bg-orange-400" />
-          Connector
-        </span>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
