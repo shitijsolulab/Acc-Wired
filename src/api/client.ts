@@ -377,6 +377,7 @@ export interface WorkflowDefinitionSpec {
   pack_key: string;
   workflow_key: string;
   name: string;
+  description?: string;
   trigger: string;
   connectors_required: string[];
   steps: { id: string; type: string; name: string }[];

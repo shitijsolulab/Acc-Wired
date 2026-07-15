@@ -23,6 +23,8 @@ import { Route as AppAssistantRouteImport } from './routes/app.assistant'
 import { Route as AppApprovalsRouteImport } from './routes/app.approvals'
 import { Route as AppAnalyticsRouteImport } from './routes/app.analytics'
 import { Route as AppAdminRouteImport } from './routes/app.admin'
+import { Route as AppWorkflowsIndexRouteImport } from './routes/app.workflows.index'
+import { Route as AppWorkflowsBuilderRouteImport } from './routes/app.workflows.builder'
 
 const DemoRoute = DemoRouteImport.update({
   id: '/demo',
@@ -94,6 +96,16 @@ const AppAdminRoute = AppAdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => AppRoute,
 } as any)
+const AppWorkflowsIndexRoute = AppWorkflowsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppWorkflowsRoute,
+} as any)
+const AppWorkflowsBuilderRoute = AppWorkflowsBuilderRouteImport.update({
+  id: '/builder',
+  path: '/builder',
+  getParentRoute: () => AppWorkflowsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -108,8 +120,10 @@ export interface FileRoutesByFullPath {
   '/app/documents': typeof AppDocumentsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/workflows': typeof AppWorkflowsRoute
+  '/app/workflows': typeof AppWorkflowsRouteWithChildren
   '/app/': typeof AppIndexRoute
+  '/app/workflows/builder': typeof AppWorkflowsBuilderRoute
+  '/app/workflows/': typeof AppWorkflowsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -123,8 +137,9 @@ export interface FileRoutesByTo {
   '/app/documents': typeof AppDocumentsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/workflows': typeof AppWorkflowsRoute
   '/app': typeof AppIndexRoute
+  '/app/workflows/builder': typeof AppWorkflowsBuilderRoute
+  '/app/workflows': typeof AppWorkflowsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -140,8 +155,10 @@ export interface FileRoutesById {
   '/app/documents': typeof AppDocumentsRoute
   '/app/knowledge': typeof AppKnowledgeRoute
   '/app/settings': typeof AppSettingsRoute
-  '/app/workflows': typeof AppWorkflowsRoute
+  '/app/workflows': typeof AppWorkflowsRouteWithChildren
   '/app/': typeof AppIndexRoute
+  '/app/workflows/builder': typeof AppWorkflowsBuilderRoute
+  '/app/workflows/': typeof AppWorkflowsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -160,6 +177,8 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/workflows'
     | '/app/'
+    | '/app/workflows/builder'
+    | '/app/workflows/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -173,8 +192,9 @@ export interface FileRouteTypes {
     | '/app/documents'
     | '/app/knowledge'
     | '/app/settings'
-    | '/app/workflows'
     | '/app'
+    | '/app/workflows/builder'
+    | '/app/workflows'
   id:
     | '__root__'
     | '/'
@@ -191,6 +211,8 @@ export interface FileRouteTypes {
     | '/app/settings'
     | '/app/workflows'
     | '/app/'
+    | '/app/workflows/builder'
+    | '/app/workflows/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -299,8 +321,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAdminRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/workflows/': {
+      id: '/app/workflows/'
+      path: '/'
+      fullPath: '/app/workflows/'
+      preLoaderRoute: typeof AppWorkflowsIndexRouteImport
+      parentRoute: typeof AppWorkflowsRoute
+    }
+    '/app/workflows/builder': {
+      id: '/app/workflows/builder'
+      path: '/builder'
+      fullPath: '/app/workflows/builder'
+      preLoaderRoute: typeof AppWorkflowsBuilderRouteImport
+      parentRoute: typeof AppWorkflowsRoute
+    }
   }
 }
+
+interface AppWorkflowsRouteChildren {
+  AppWorkflowsBuilderRoute: typeof AppWorkflowsBuilderRoute
+  AppWorkflowsIndexRoute: typeof AppWorkflowsIndexRoute
+}
+
+const AppWorkflowsRouteChildren: AppWorkflowsRouteChildren = {
+  AppWorkflowsBuilderRoute: AppWorkflowsBuilderRoute,
+  AppWorkflowsIndexRoute: AppWorkflowsIndexRoute,
+}
+
+const AppWorkflowsRouteWithChildren = AppWorkflowsRoute._addFileChildren(
+  AppWorkflowsRouteChildren,
+)
 
 interface AppRouteChildren {
   AppAdminRoute: typeof AppAdminRoute
@@ -312,7 +362,7 @@ interface AppRouteChildren {
   AppDocumentsRoute: typeof AppDocumentsRoute
   AppKnowledgeRoute: typeof AppKnowledgeRoute
   AppSettingsRoute: typeof AppSettingsRoute
-  AppWorkflowsRoute: typeof AppWorkflowsRoute
+  AppWorkflowsRoute: typeof AppWorkflowsRouteWithChildren
   AppIndexRoute: typeof AppIndexRoute
 }
 
@@ -326,7 +376,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDocumentsRoute: AppDocumentsRoute,
   AppKnowledgeRoute: AppKnowledgeRoute,
   AppSettingsRoute: AppSettingsRoute,
-  AppWorkflowsRoute: AppWorkflowsRoute,
+  AppWorkflowsRoute: AppWorkflowsRouteWithChildren,
   AppIndexRoute: AppIndexRoute,
 }
 
