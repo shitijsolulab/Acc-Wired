@@ -123,6 +123,9 @@ export interface ConnectorItem {
   kind: string;
   enabled: boolean;
   tool_count: number;
+  /** Present on the full catalogue (`?all=true`): whether the tenant is entitled
+   *  to use this connector. Absent (undefined) on the entitled-only default list. */
+  entitled?: boolean;
 }
 
 export interface AuditEvent {
@@ -370,6 +373,71 @@ export function getWorkflow(id: string): Promise<WorkflowItem> {
   return request<WorkflowItem>(`/api/workflows/workflows/${id}`);
 }
 
+export interface WorkflowDefinitionSpec {
+  pack_key: string;
+  workflow_key: string;
+  name: string;
+  trigger: string;
+  connectors_required: string[];
+  steps: { id: string; type: string; name: string }[];
+  latest_status?: string | null;
+  latest_run_id?: string | null;
+  /** "seed" = shipped template, "user" = builder-authored (pack_key === "custom"). */
+  source?: "seed" | "user";
+}
+
+export function listWorkflowDefinitions(): Promise<WorkflowDefinitionSpec[]> {
+  return request<WorkflowDefinitionSpec[]>("/api/workflows/packs/definitions");
+}
+
+/** Create/upsert a user workflow definition. `pack` is forced to "custom" server-side;
+ *  the definition's `key` is the workflow id (upsert by key). */
+export function createWorkflowDefinition(definition: unknown): Promise<WorkflowDefinitionSpec> {
+  return request<WorkflowDefinitionSpec>("/api/workflows/packs/definitions", {
+    method: "POST",
+    body: JSON.stringify({ definition }),
+  });
+}
+
+/** Update an existing user workflow definition (user flows only). */
+export function updateWorkflowDefinition(
+  key: string,
+  definition: unknown,
+): Promise<WorkflowDefinitionSpec> {
+  return request<WorkflowDefinitionSpec>(`/api/workflows/packs/definitions/${key}`, {
+    method: "PUT",
+    body: JSON.stringify({ definition }),
+  });
+}
+
+/** Delete a user workflow definition. */
+export function deleteWorkflowDefinition(key: string): Promise<unknown> {
+  return request(`/api/workflows/packs/definitions/${key}`, { method: "DELETE" });
+}
+
+/** The FULL stored WorkflowDefinition JSON (with per-step config) — needed to edit a flow
+ *  in the builder (the list spec carries only id/type/name per step). Defaults to the
+ *  reserved "custom" pack (user flows). */
+export function getWorkflowDefinition(
+  key: string,
+  packKey = "custom",
+): Promise<Record<string, unknown>> {
+  const q = encodeURIComponent(packKey);
+  return request<Record<string, unknown>>(`/api/workflows/packs/definitions/${key}?pack_key=${q}`);
+}
+
+/** Start a run of a workflow definition by key. */
+export function startWorkflow(
+  packKey: string,
+  workflowKey: string,
+  inputs?: Record<string, unknown>,
+): Promise<{ run_id?: string; status?: string }> {
+  return request(`/api/workflows/packs/${workflowKey}/run`, {
+    method: "POST",
+    body: JSON.stringify({ pack_key: packKey, inputs: inputs ?? {} }),
+  });
+}
+
 export function startDocumentReview(
   documentId: string,
 ): Promise<{ workflow_id: string; status: string }> {
@@ -396,6 +464,28 @@ export function rejectWorkflow(id: string, comment = ""): Promise<unknown> {
 // ---------------------------------------------------------------- connectors
 export function listConnectors(): Promise<ConnectorItem[]> {
   return request<ConnectorItem[]>("/api/connectors/connectors");
+}
+
+/** Full connector catalogue with an `entitled` flag on each item (vs. the default
+ *  entitled-only list). Used by the workflow builder palette. */
+export function listConnectorCatalog(): Promise<ConnectorItem[]> {
+  return request<ConnectorItem[]>("/api/connectors/connectors?all=true");
+}
+
+export interface ConnectSession {
+  status: "ok" | "sandbox";
+  session_token?: string; // present when status === "ok" (live Nango)
+  provider?: string;
+  message?: string; // present in sandbox mode
+}
+
+/** Create a Nango Connect session so the current tenant's user can authorize the
+ * provider from inside our app. Feed `session_token` to Nango's Connect UI; on success
+ * PUT the resulting connection_id back via configureConnector({ config:{ connection_id }}). */
+export function getConnectSession(key: string): Promise<ConnectSession> {
+  return request<ConnectSession>(`/api/connectors/connectors/${key}/connect-session`, {
+    method: "POST",
+  });
 }
 
 export function configureConnector(
@@ -456,11 +546,19 @@ export const api = {
   retrieve,
   listWorkflows,
   getWorkflow,
+  listWorkflowDefinitions,
+  getWorkflowDefinition,
+  createWorkflowDefinition,
+  updateWorkflowDefinition,
+  deleteWorkflowDefinition,
+  startWorkflow,
   startDocumentReview,
   approveWorkflow,
   rejectWorkflow,
   listConnectors,
+  listConnectorCatalog,
   configureConnector,
+  getConnectSession,
   listAuditEvents,
   getTenant,
   updateTenantSettings,

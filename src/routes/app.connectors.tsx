@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Layers, Plug, Plus, Search, ShieldCheck } from "lucide-react";
 import { useMemo, useState } from "react";
+import Nango from "@nangohq/frontend";
 
 import { api, useConnectors, type ConnectorItem } from "../api";
 import { EmptyState, LoadingState } from "../components/common/states";
@@ -148,6 +149,27 @@ function Chip({ label, active, onClick }: { label: string; active: boolean; onCl
   );
 }
 
+async function handleConnect(key: string, queryClient: ReturnType<typeof useQueryClient>) {
+  const session = await api.getConnectSession(key);
+  // Sandbox (no NANGO_SECRET_KEY on the backend) → just enable; no OAuth needed.
+  if (session.status === "sandbox" || !session.session_token) {
+    await api.configureConnector(key, { enabled: true });
+    queryClient.invalidateQueries({ queryKey: ["connectors"] });
+    return;
+  }
+  // Live: open Nango's Connect UI so the user authorizes their OWN account.
+  const nango = new Nango();
+  // NOTE: confirm this call/return against your installed @nangohq/frontend version.
+  const result: any = await nango.openConnectUI({ sessionToken: session.session_token });
+  const connectionId =
+    result?.connectionId ?? result?.payload?.connectionId ?? result?.connection?.connectionId;
+  await api.configureConnector(key, {
+    enabled: true,
+    config: connectionId ? { connection_id: connectionId } : {},
+  });
+  queryClient.invalidateQueries({ queryKey: ["connectors"] });
+}
+
 function IntegrationCard({ connector }: { connector: ConnectorItem }) {
   const queryClient = useQueryClient();
   const [pending, setPending] = useState(false);
@@ -156,8 +178,14 @@ function IntegrationCard({ connector }: { connector: ConnectorItem }) {
   const toggle = async () => {
     setPending(true);
     try {
-      await api.configureConnector(connector.key, { enabled: !connector.enabled });
-      await queryClient.invalidateQueries({ queryKey: ["connectors"] });
+      if (connector.enabled) {
+        await api.configureConnector(connector.key, { enabled: false });
+        await queryClient.invalidateQueries({ queryKey: ["connectors"] });
+      } else {
+        await handleConnect(connector.key, queryClient);
+      }
+    } catch (err) {
+      console.error(err);
     } finally {
       setPending(false);
     }

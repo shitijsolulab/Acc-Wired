@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { AppHeader } from "../components/layout/AppHeader";
 import { AppSidebar } from "../components/layout/AppSidebar";
+import { Toaster } from "../components/ui/sonner";
 import { SessionProvider } from "../lib/session";
 import { ThemeProvider, useTheme } from "../lib/theme";
 import { cn } from "../lib/utils";
@@ -33,6 +34,7 @@ function AppLayout() {
         }}
       >
         <Shell />
+        <Toaster />
       </SessionProvider>
     </ThemeProvider>
   );

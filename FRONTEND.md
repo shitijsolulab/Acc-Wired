@@ -63,9 +63,9 @@ src/
 | AI Assistant (`app.assistant`) | `chatStream` → `/api/orchestrator/chat/stream` (workspace-aware; surfaces backend errors) |
 | Dashboard (`app.index`) | system status → `useSystemHealth`; recent docs → `useDocuments`; activity → `useAuditEvents` |
 | Documents (`app.documents`) | `useDocuments` (+ upload) |
-| Workflows (`app.workflows`) | `useWorkflows` |
+| Workflows (`app.workflows`) | runs `useWorkflows`; templates + **My workflows** `useWorkflowDefinitions`; **visual builder** at `/app/workflows/builder` (see below) |
 | Approvals (`app.approvals`) | pending `useWorkflows` + approve/reject via `useDecideWorkflow` |
-| Connectors (`app.connectors`) | `useConnectors` (+ enable/disable via `configureConnector`) |
+| Connectors (`app.connectors`) | `useConnectors`; **Connect** opens Nango's Connect UI (`@nangohq/frontend`) via `getConnectSession` → `configureConnector` (sandbox mode just enables) |
 | Admin (`app.admin`) | `useUsers`, `useAuditEvents` |
 | Settings (`app.settings`) | `useTenant`, `useSession` |
 
@@ -73,6 +73,23 @@ src/
 Analytics KPIs/charts, Knowledge help-articles, Document-Intelligence (OCR/extraction),
 and the dashboard's month-end-close checklist. Wire these once the backend exposes
 invoice/ledger/OCR data.
+
+## Visual workflow builder (`/app/workflows/builder`)
+An n8n-style canvas (**`@xyflow/react`**) for building your own flows — no code, no deploy.
+- **Palette:** the tenant's *entitled* connectors (`listConnectorCatalog` → `GET /connectors?all=true`)
+  + step types (AI action, Approval, Branch, Notify, Transform). Drag or click to add nodes.
+- **Config panel:** per-step fields (connector + endpoint, inline AI prompt, approver, branch
+  condition, …). Name the flow, then **Save**.
+- **Serialize** (`components/workflow/builder/serialize.ts`): the canvas is flattened to the
+  engine's **ordered step list with `when` guards** (the engine runs steps in order, not a free
+  DAG) — DFS from the trigger, branch guards derived and stopped at merge points, friendly
+  config mapped to the exact engine config per step type. Saved via `createWorkflowDefinition`
+  → `POST /api/workflows/packs/definitions` (stored under the reserved `custom` pack, `source: "user"`).
+- **My workflows:** user flows (`source === "user"`) list with **Run** (`startWorkflow`, pack
+  `custom`) / **Edit** (`/builder?key=…`, loads the full definition via `getWorkflowDefinition`) /
+  **Delete**. The AI assistant can also start a saved flow by name ("run <name>").
+- Requires `@xyflow/react` installed (`npm install`) and the backend from ADR-0019 (migration
+  `0004` applied + the tenant granted connector entitlements).
 
 ## Run
 The backend must be running (gateway on `:8000`), and for the assistant to answer, a valid
