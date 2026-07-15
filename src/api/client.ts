@@ -180,6 +180,44 @@ export interface ChatReply {
   answer: string;
 }
 
+/** Emitted on the stream when the assistant actually STARTED a workflow. Carries the
+ *  run id so the chat can render a live run card + gate the composer. Extra fields the
+ *  backend may add are preserved. */
+export interface ChatWorkflowRef {
+  run_id: string;
+  status: string;
+  [key: string]: unknown;
+}
+
+/** One decoded SSE frame from `chatStream` (a JSON `data:` object). The FIRST frame
+ *  carries `session_id`; a `workflow` frame signals a started run; `delta` frames
+ *  stream text; `error` signals an LLM failure. */
+export interface ChatStreamFrame {
+  session_id?: string;
+  model?: string;
+  delta?: string;
+  error?: string;
+  workflow?: ChatWorkflowRef;
+}
+
+/** Restored server-side chat history for a session (empty list if not this user's
+ *  session). Used to rehydrate the AI Assistant after a tab switch / reload. */
+export interface ChatHistory {
+  session_id: string;
+  messages: { role: "user" | "assistant"; content: string }[];
+}
+
+/** One row in the Conversations sidebar. `title` is auto-derived from the first
+ *  message; `preview` is the first user message. Sessions with no messages are
+ *  omitted by the backend. Returned most-recent-first. */
+export interface ChatSessionSummary {
+  id: string;
+  title: string;
+  preview: string;
+  created_at: string;
+  last_activity: string | null;
+}
+
 // ---------------------------------------------------------------- auth
 export interface SignupInput {
   name: string;
@@ -302,14 +340,15 @@ export function chat(input: {
   });
 }
 
-/** Streaming chat via SSE. Yields text deltas; caller concatenates. */
+/** Streaming chat via SSE. Yields decoded frames; caller concatenates `delta`s and
+ *  reacts to the first frame's `session_id` and any `workflow` frame. */
 export async function* chatStream(input: {
   message: string;
   session_id?: string;
   use_rag?: boolean;
   model?: string;
   workspace?: string; // active industry workspace, so the assistant is workspace-aware
-}): AsyncGenerator<{ delta?: string; session_id?: string; model?: string; error?: string }> {
+}): AsyncGenerator<ChatStreamFrame> {
   const resp = await fetch(`${API_URL}/api/orchestrator/chat/stream`, {
     method: "POST",
     headers: {
@@ -339,6 +378,36 @@ export async function* chatStream(input: {
       }
     }
   }
+}
+
+/** Restore a chat session's messages so the AI Assistant survives tab switches. */
+export function getChatHistory(sessionId: string): Promise<ChatHistory> {
+  return request<ChatHistory>(
+    `/api/orchestrator/chat/history?session_id=${encodeURIComponent(sessionId)}`,
+  );
+}
+
+/** This user's chat sessions for the Conversations sidebar (most-recent-first). */
+export function listChatSessions(): Promise<ChatSessionSummary[]> {
+  return request<ChatSessionSummary[]>("/api/orchestrator/chat/sessions");
+}
+
+/** Rename a chat session (updates its sidebar title). */
+export function renameChatSession(
+  id: string,
+  title: string,
+): Promise<{ id: string; title: string }> {
+  return request<{ id: string; title: string }>(
+    `/api/orchestrator/chat/sessions/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify({ title }) },
+  );
+}
+
+/** Delete a chat session and its history. */
+export function deleteChatSession(id: string): Promise<unknown> {
+  return request(`/api/orchestrator/chat/sessions/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
 }
 
 // ---------------------------------------------------------------- knowledge
@@ -629,6 +698,10 @@ export const api = {
   getMe,
   chat,
   chatStream,
+  getChatHistory,
+  listChatSessions,
+  renameChatSession,
+  deleteChatSession,
   listDocuments,
   getDocument,
   uploadDocument,

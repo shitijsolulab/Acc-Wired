@@ -19,7 +19,10 @@ import {
   useWorkflows,
   type WorkflowDefinitionSpec,
 } from "../api";
+import { useState } from "react";
+
 import { EmptyState, LoadingState } from "../components/common/states";
+import { WorkflowDialog } from "../components/workflow/WorkflowDialog";
 import { WorkflowFlow } from "../components/workflow/WorkflowFlow";
 import { cn } from "../lib/utils";
 
@@ -253,6 +256,7 @@ function MyWorkflowCard({ def }: { def: WorkflowDefinitionSpec }) {
 function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
   const navigate = useNavigate();
   const start = useStartWorkflow();
+  const [open, setOpen] = useState(false);
 
   const onRun = () =>
     start.mutate(
@@ -268,34 +272,58 @@ function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
     );
 
   return (
-    <div>
-      <div className="mb-1 flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-foreground">{def.name}</h3>
-        {def.latest_status && (
-          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-            {def.latest_status}
-          </span>
-        )}
-        <button
-          onClick={onRun}
-          disabled={start.isPending}
-          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
-        >
-          {start.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Play className="h-3.5 w-3.5" />
+    <>
+      {/* Click the card to open the expanded flow view; the Run button stops propagation. */}
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        className="group cursor-pointer rounded-xl outline-none ring-offset-2 ring-offset-background transition focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold text-foreground transition group-hover:text-primary">
+            {def.name}
+          </h3>
+          {def.latest_status && (
+            <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+              {def.latest_status}
+            </span>
           )}
-          {start.isPending ? "Starting…" : "Run"}
-        </button>
+          <span className="hidden text-[11px] text-muted-foreground group-hover:inline">
+            Click to expand
+          </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRun();
+            }}
+            disabled={start.isPending}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
+          >
+            {start.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {start.isPending ? "Starting…" : "Run"}
+          </button>
+        </div>
+        {def.description && (
+          <p className="mb-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+            {def.description}
+          </p>
+        )}
+        <WorkflowFlow def={def} />
       </div>
-      {def.description && (
-        <p className="mb-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-          {def.description}
-        </p>
-      )}
-      <WorkflowFlow def={def} />
-    </div>
+
+      <WorkflowDialog def={def} open={open} onOpenChange={setOpen} />
+    </>
   );
 }
 
