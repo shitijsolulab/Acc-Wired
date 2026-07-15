@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2,
   ClipboardCheck,
@@ -24,6 +24,14 @@ import { WorkflowFlow } from "../components/workflow/WorkflowFlow";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/workflows/")({ component: Workflows });
+
+// Demo inputs for template runs — drives the invoice flow's demo/Sheets branch
+// (skip the accounting connector, write to a demo sheet). Harmless for other templates.
+const RUN_INPUTS = {
+  invoice_email: { id: "demo" },
+  has_accounting_connector: false,
+  sheet_id: "demo-sheet",
+} as const;
 
 /* ─────────────────────────  Status styling  ───────────────────────── */
 
@@ -91,22 +99,7 @@ function Workflows() {
         <div className="mb-6 space-y-3">
           <h2 className="text-sm font-semibold text-foreground">Workflow templates</h2>
           {templates.map((d) => (
-            <div key={d.workflow_key}>
-              <div className="mb-1 flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">{d.name}</h3>
-                {d.latest_status && (
-                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
-                    {d.latest_status}
-                  </span>
-                )}
-              </div>
-              {d.description && (
-                <p className="mb-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
-                  {d.description}
-                </p>
-              )}
-              <WorkflowFlow def={d} />
-            </div>
+            <TemplateCard key={d.workflow_key} def={d} />
           ))}
         </div>
       )}
@@ -187,14 +180,21 @@ function Workflows() {
 /* ─────────────────────────  My workflow card  ───────────────────────── */
 
 function MyWorkflowCard({ def }: { def: WorkflowDefinitionSpec }) {
+  const navigate = useNavigate();
   const start = useStartWorkflow();
   const remove = useDeleteWorkflowDefinition();
 
+  // User flows may not need inputs, so send {} (safe for arbitrary flows).
   const onRun = () =>
     start.mutate(
-      { packKey: "custom", workflowKey: def.workflow_key },
+      { packKey: "custom", workflowKey: def.workflow_key, inputs: {} },
       {
-        onSuccess: () => toast.success(`Started “${def.name}”.`),
+        onSuccess: (res) => {
+          toast.success(`Started “${def.name}”.`);
+          if (res.run_id) {
+            navigate({ to: "/app/workflows/runs/$runId", params: { runId: res.run_id } });
+          }
+        },
         onError: (e) => toast.error(e instanceof Error ? e.message : "Could not start the workflow."),
       },
     );
@@ -223,7 +223,7 @@ function MyWorkflowCard({ def }: { def: WorkflowDefinitionSpec }) {
             className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
           >
             {start.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-            Run
+            {start.isPending ? "Starting…" : "Run"}
           </button>
           <Link
             to="/app/workflows/builder"
@@ -243,6 +243,57 @@ function MyWorkflowCard({ def }: { def: WorkflowDefinitionSpec }) {
           </button>
         </div>
       </div>
+      <WorkflowFlow def={def} />
+    </div>
+  );
+}
+
+/* ─────────────────────────  Template card  ───────────────────────── */
+
+function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
+  const navigate = useNavigate();
+  const start = useStartWorkflow();
+
+  const onRun = () =>
+    start.mutate(
+      { packKey: def.pack_key, workflowKey: def.workflow_key, inputs: RUN_INPUTS },
+      {
+        onSuccess: (res) => {
+          if (res.run_id) {
+            navigate({ to: "/app/workflows/runs/$runId", params: { runId: res.run_id } });
+          }
+        },
+        onError: (e) => toast.error(e instanceof Error ? e.message : "Could not start the workflow."),
+      },
+    );
+
+  return (
+    <div>
+      <div className="mb-1 flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-foreground">{def.name}</h3>
+        {def.latest_status && (
+          <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground">
+            {def.latest_status}
+          </span>
+        )}
+        <button
+          onClick={onRun}
+          disabled={start.isPending}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
+        >
+          {start.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Play className="h-3.5 w-3.5" />
+          )}
+          {start.isPending ? "Starting…" : "Run"}
+        </button>
+      </div>
+      {def.description && (
+        <p className="mb-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+          {def.description}
+        </p>
+      )}
       <WorkflowFlow def={def} />
     </div>
   );

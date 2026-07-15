@@ -13,6 +13,7 @@ export * from "./query/useSystemHealth";
 export * from "./query/useTenant";
 export * from "./query/useUsers";
 export * from "./query/useAuditEvents";
+export * from "./query/useRun";
 
 // Mutation hooks
 export * from "./mutation/useAssignRole";
@@ -25,3 +26,4 @@ export * from "./mutation/useStartWorkflow";
 export * from "./mutation/useRequestAccess";
 export * from "./mutation/useDecideAccessRequest";
 export * from "./mutation/useSetEntitlement";
+export * from "./mutation/useDecideRun";
