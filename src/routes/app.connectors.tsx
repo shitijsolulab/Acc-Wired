@@ -1,36 +1,35 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronRight, Layers, Plug, Plus, Search, ShieldCheck } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Check, Clock, Plug, Plus, ShieldCheck, ShieldPlus, X } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import Nango from "@nangohq/frontend";
 
-import { api, useConnectors, type ConnectorItem } from "../api";
-import { EmptyState, LoadingState } from "../components/common/states";
+import {
+  api,
+  useConnectorCatalog,
+  useAccessRequests,
+  useRequestAccess,
+  useDecideAccessRequest,
+  useSetEntitlement,
+  type AccessRequest,
+  type ConnectorItem,
+} from "../api";
+import { LoadingState } from "../components/common/states";
 import { IntegrationLogo } from "../components/common/IntegrationLogo";
+import { useSession } from "../lib/session";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/connectors")({ component: Connectors });
 
 function Connectors() {
-  const [query, setQuery] = useState("");
-  const [active, setActive] = useState<string>("all");
+  const { data: connectors = [], isLoading } = useConnectorCatalog();
+  const { data: requests = [] } = useAccessRequests();
+  const { isManager: isAdmin } = useSession();
 
-  const { data: connectors = [], isLoading } = useConnectors();
-
-  const categories = useMemo(
-    () => Array.from(new Set(connectors.map((c) => c.kind))),
-    [connectors],
-  );
-
-  const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return connectors.filter((c) => {
-      const matchesCat = active === "all" || c.kind === active;
-      const matchesQuery =
-        !q || c.name.toLowerCase().includes(q) || c.kind.toLowerCase().includes(q);
-      return matchesCat && matchesQuery;
-    });
-  }, [connectors, query, active]);
+  const connected = connectors.filter((c) => c.entitled && c.enabled);
+  const available = connectors.filter((c) => c.entitled && !c.enabled);
+  const restricted = connectors.filter((c) => !c.entitled);
 
   return (
     <div className="space-y-7">
@@ -45,17 +44,13 @@ function Connectors() {
             Connected systems
           </h1>
           <p className="mt-1.5 max-w-xl text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {connectors.length} integrations
-            </span>{" "}
-            across {categories.length} categories. Authenticate once, then let your copilots read and
-            act across them.
+            <span className="font-medium text-foreground">{connected.length} connected</span>{" "}
+            {available.length > 0 && (
+              <>· {available.length} ready to connect </>
+            )}
+            — authenticate once, then let your copilots read and act across them.
           </p>
         </div>
-        <button className="brand-gradient inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-xs font-semibold text-primary-foreground shadow-sm shadow-primary/25 transition hover:opacity-90">
-          <Plug className="h-3.5 w-3.5" />
-          Request a connector
-        </button>
       </div>
 
       {/* Non-replacement callout — mirrors the Build Flow "works with your stack" panel */}
@@ -84,113 +79,88 @@ function Connectors() {
         </div>
       </section>
 
-      {/* Search + category filter */}
-      <div className="flex flex-col gap-3">
-        <div className="relative max-w-md">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search integrations…"
-            className="w-full rounded-lg border border-border bg-surface py-2 pl-9 pr-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20"
-          />
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-1.5">
-            <Chip label="All" active={active === "all"} onClick={() => setActive("all")} />
-            {categories.map((c) => (
-              <Chip key={c} label={c} active={active === c} onClick={() => setActive(c)} />
-            ))}
-          </div>
-          <span className="flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
-            <Layers className="h-3.5 w-3.5" />
-            {results.length} of {connectors.length} shown
-          </span>
-        </div>
-      </div>
-
       {isLoading ? (
         <LoadingState />
-      ) : connectors.length === 0 ? (
-        <EmptyState
-          icon={Plug}
-          title="No connectors yet"
-          description="Connect a system to let your copilots read and act across it."
-        />
-      ) : results.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-border py-16 text-center text-sm text-muted-foreground">
-          No integrations match “{query}”.
-        </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {results.map((c) => (
-            <IntegrationCard key={c.key} connector={c} />
-          ))}
+        <div className="space-y-8">
+          {/* 1 — Connected Systems */}
+          {connected.length > 0 && (
+            <Section label="Connected Systems" count={connected.length}>
+              {connected.map((c) => (
+                <ConnectedCard key={c.key} connector={c} />
+              ))}
+            </Section>
+          )}
+
+          {/* 2 — Available Connectors */}
+          {available.length > 0 && (
+            <Section label="Available Connectors" count={available.length}>
+              {available.map((c) => (
+                <AvailableCard key={c.key} connector={c} />
+              ))}
+            </Section>
+          )}
+
+          {/* 3 — Pending Permissions */}
+          {restricted.length > 0 ? (
+            <Section label="Pending Permissions" count={restricted.length}>
+              {restricted.map((c) => (
+                <PendingCard
+                  key={c.key}
+                  connector={c}
+                  request={requests.find(
+                    (r) => r.connector_key === c.key && r.status === "pending",
+                  )}
+                  isAdmin={isAdmin}
+                />
+              ))}
+            </Section>
+          ) : (
+            connectors.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                No connectors are pending — your workspace has access to the full catalog.
+              </p>
+            )
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Chip({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+/** Uppercase section label + count, styled like the rest of the app. */
+function Section({
+  label,
+  count,
+  children,
+}: {
+  label: string;
+  count: number;
+  children: ReactNode;
+}) {
   return (
-    <button
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-3 py-1 text-xs font-medium transition",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "border-border bg-surface text-muted-foreground hover:border-primary/40 hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
+    <section className="space-y-3">
+      <div className="flex items-center gap-2 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+        <span>{label}</span>
+        <span className="rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
+          {count}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{children}</div>
+    </section>
   );
 }
 
-async function handleConnect(key: string, queryClient: ReturnType<typeof useQueryClient>) {
-  const session = await api.getConnectSession(key);
-  // Sandbox (no NANGO_SECRET_KEY on the backend) → just enable; no OAuth needed.
-  if (session.status === "sandbox" || !session.session_token) {
-    await api.configureConnector(key, { enabled: true });
-    queryClient.invalidateQueries({ queryKey: ["connectors"] });
-    return;
-  }
-  // Live: open Nango's Connect UI so the user authorizes their OWN account.
-  const nango = new Nango();
-  // NOTE: confirm this call/return against your installed @nangohq/frontend version.
-  const result: any = await nango.openConnectUI({ sessionToken: session.session_token });
-  const connectionId =
-    result?.connectionId ?? result?.payload?.connectionId ?? result?.connection?.connectionId;
-  await api.configureConnector(key, {
-    enabled: true,
-    config: connectionId ? { connection_id: connectionId } : {},
-  });
-  queryClient.invalidateQueries({ queryKey: ["connectors"] });
-}
-
-function IntegrationCard({ connector }: { connector: ConnectorItem }) {
-  const queryClient = useQueryClient();
-  const [pending, setPending] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  const toggle = async () => {
-    setPending(true);
-    try {
-      if (connector.enabled) {
-        await api.configureConnector(connector.key, { enabled: false });
-        await queryClient.invalidateQueries({ queryKey: ["connectors"] });
-      } else {
-        await handleConnect(connector.key, queryClient);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setPending(false);
-    }
-  };
-
+/** Shared connector card visual — logo/name/kind/tools, with a per-section badge + action area. */
+function ConnectorCard({
+  connector,
+  badge,
+  actions,
+}: {
+  connector: ConnectorItem;
+  badge?: ReactNode;
+  actions?: ReactNode;
+}) {
   return (
     <div className="group flex flex-col rounded-2xl border border-border bg-surface p-4 transition hover:border-primary/50 hover:shadow-sm">
       <div className="flex items-start justify-between gap-3">
@@ -206,64 +176,230 @@ function IntegrationCard({ connector }: { connector: ConnectorItem }) {
         </span>
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          <span
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              connector.enabled ? "bg-primary" : "bg-muted-foreground/60",
-            )}
-          />
-          {connector.enabled ? "Enabled" : "Disabled"}
-        </span>
-      </div>
-
-      <div className="mt-4 flex items-center gap-2">
-        <button
-          onClick={toggle}
-          disabled={pending}
-          className={cn(
-            "inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-60",
-            connector.enabled
-              ? "border-primary/40 bg-primary/10 text-primary"
-              : "border-border bg-background text-foreground hover:border-primary hover:text-primary",
-          )}
-        >
-          {connector.enabled ? (
-            <>
-              <Check className="h-3.5 w-3.5" /> Enabled
-            </>
-          ) : (
-            <>
-              <Plus className="h-3.5 w-3.5" /> Enable
-            </>
-          )}
-        </button>
-        <button
-          onClick={() => setExpanded((e) => !e)}
-          aria-label={expanded ? "Hide details" : "Show details"}
-          className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-primary/40 hover:text-foreground"
-        >
-          <ChevronRight className={cn("h-4 w-4 transition-transform", expanded && "rotate-90")} />
-        </button>
-      </div>
-
-      {expanded && (
-        <dl className="mt-3 space-y-1.5 border-t border-border pt-3 text-[11px]">
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Kind</dt>
-            <dd className="font-medium text-foreground">{connector.kind}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Tools</dt>
-            <dd className="font-medium text-foreground">{connector.tool_count}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt className="text-muted-foreground">Key</dt>
-            <dd className="truncate font-mono font-medium text-foreground">{connector.key}</dd>
-          </div>
-        </dl>
-      )}
+      {badge && <div className="mt-3 flex items-center gap-2">{badge}</div>}
+      {actions && <div className="mt-4 flex items-center gap-2">{actions}</div>}
     </div>
+  );
+}
+
+/** Reuse of the original Connect flow (Nango live / sandbox enable). Preserved verbatim. */
+async function handleConnect(key: string, queryClient: ReturnType<typeof useQueryClient>) {
+  const session = await api.getConnectSession(key);
+  // Sandbox (no NANGO_SECRET_KEY on the backend) → just enable; no OAuth needed.
+  if (session.status === "sandbox" || !session.session_token) {
+    await api.configureConnector(key, { enabled: true });
+    queryClient.invalidateQueries({ queryKey: ["connector-catalog"] });
+    return;
+  }
+  // Live: open Nango's Connect UI so the user authorizes their OWN account.
+  const nango = new Nango();
+  // NOTE: confirm this call/return against your installed @nangohq/frontend version.
+  const result: any = await nango.openConnectUI({ sessionToken: session.session_token });
+  const connectionId =
+    result?.connectionId ?? result?.payload?.connectionId ?? result?.connection?.connectionId;
+  await api.configureConnector(key, {
+    enabled: true,
+    config: connectionId ? { connection_id: connectionId } : {},
+  });
+  queryClient.invalidateQueries({ queryKey: ["connector-catalog"] });
+}
+
+// --- Section 1: Connected -----------------------------------------------------
+function ConnectedCard({ connector }: { connector: ConnectorItem }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const disconnect = async () => {
+    setBusy(true);
+    try {
+      await api.configureConnector(connector.key, { enabled: false });
+      await qc.invalidateQueries({ queryKey: ["connector-catalog"] });
+      toast.success(`Disconnected ${connector.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not disconnect.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ConnectorCard
+      connector={connector}
+      badge={
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Connected
+        </span>
+      }
+      actions={
+        <button
+          onClick={disconnect}
+          disabled={busy}
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-60"
+        >
+          <X className="h-3.5 w-3.5" /> Disconnect
+        </button>
+      }
+    />
+  );
+}
+
+// --- Section 2: Available -----------------------------------------------------
+function AvailableCard({ connector }: { connector: ConnectorItem }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+
+  const connect = async () => {
+    setBusy(true);
+    try {
+      await handleConnect(connector.key, qc);
+      await qc.invalidateQueries({ queryKey: ["connector-catalog"] });
+      toast.success(`Connected ${connector.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not connect.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ConnectorCard
+      connector={connector}
+      badge={
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+          Not connected
+        </span>
+      }
+      actions={
+        <button
+          onClick={connect}
+          disabled={busy}
+          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary disabled:opacity-60"
+        >
+          <Plus className="h-3.5 w-3.5" /> Connect
+        </button>
+      }
+    />
+  );
+}
+
+// --- Section 3: Pending Permissions ------------------------------------------
+function PendingCard({
+  connector,
+  request,
+  isAdmin,
+}: {
+  connector: ConnectorItem;
+  request?: AccessRequest;
+  isAdmin: boolean;
+}) {
+  const requestAccess = useRequestAccess();
+  const decide = useDecideAccessRequest();
+  const grant = useSetEntitlement();
+
+  const awaiting = (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-600 dark:text-amber-400">
+      <Clock className="h-3 w-3" />
+      Awaiting approval
+    </span>
+  );
+
+  // A pending access request already exists for this connector.
+  if (request) {
+    return (
+      <ConnectorCard
+        connector={connector}
+        badge={awaiting}
+        actions={
+          isAdmin ? (
+            <>
+              <button
+                onClick={() =>
+                  decide.mutate(
+                    { id: request.id, decision: "approve" },
+                    {
+                      onSuccess: () => toast.success(`Granted access to ${connector.name}.`),
+                      onError: (e) =>
+                        toast.error(e instanceof Error ? e.message : "Could not approve."),
+                    },
+                  )
+                }
+                disabled={decide.isPending}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
+              >
+                <Check className="h-3.5 w-3.5" /> Approve
+              </button>
+              <button
+                onClick={() =>
+                  decide.mutate(
+                    { id: request.id, decision: "reject" },
+                    {
+                      onSuccess: () => toast.success(`Rejected the request for ${connector.name}.`),
+                      onError: (e) =>
+                        toast.error(e instanceof Error ? e.message : "Could not reject."),
+                    },
+                  )
+                }
+                disabled={decide.isPending}
+                className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-destructive hover:text-destructive disabled:opacity-60"
+              >
+                <X className="h-3.5 w-3.5" /> Reject
+              </button>
+            </>
+          ) : undefined
+        }
+      />
+    );
+  }
+
+  // No pending request yet.
+  return (
+    <ConnectorCard
+      connector={connector}
+      badge={
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-2 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+          Not entitled
+        </span>
+      }
+      actions={
+        isAdmin ? (
+          <button
+            onClick={() =>
+              grant.mutate(
+                { key: connector.key, allowed: true },
+                {
+                  onSuccess: () => toast.success(`Granted access to ${connector.name}.`),
+                  onError: (e) =>
+                    toast.error(e instanceof Error ? e.message : "Could not grant access."),
+                },
+              )
+            }
+            disabled={grant.isPending}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
+          >
+            <ShieldPlus className="h-3.5 w-3.5" /> Grant access
+          </button>
+        ) : (
+          <button
+            onClick={() =>
+              requestAccess.mutate(
+                { key: connector.key },
+                {
+                  onSuccess: () => toast.success(`Requested access to ${connector.name}.`),
+                  onError: (e) =>
+                    toast.error(e instanceof Error ? e.message : "Could not request access."),
+                },
+              )
+            }
+            disabled={requestAccess.isPending}
+            className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground transition hover:border-primary hover:text-primary disabled:opacity-60"
+          >
+            <Plug className="h-3.5 w-3.5" /> Request access
+          </button>
+        )
+      }
+    />
   );
 }
