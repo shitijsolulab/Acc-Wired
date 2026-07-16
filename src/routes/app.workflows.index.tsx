@@ -2,6 +2,7 @@ import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2,
   ClipboardCheck,
+  Eye,
   Loader2,
   Pencil,
   Play,
@@ -22,8 +23,8 @@ import {
 import { useState } from "react";
 
 import { EmptyState, LoadingState } from "../components/common/states";
-import { WorkflowDialog } from "../components/workflow/WorkflowDialog";
 import { WorkflowFlow } from "../components/workflow/WorkflowFlow";
+import { WorkflowPreview } from "../components/workflow/WorkflowPreview";
 import { cn } from "../lib/utils";
 
 export const Route = createFileRoute("/app/workflows/")({ component: Workflows });
@@ -56,6 +57,9 @@ function Workflows() {
   const { data: definitions = [] } = useWorkflowDefinitions();
   const templates = definitions.filter((d) => d.pack_key === "accounting");
   const myWorkflows = definitions.filter((d) => d.source === "user");
+
+  // A single slide-in preview panel, driven by whichever template was clicked.
+  const [activeTemplate, setActiveTemplate] = useState<WorkflowDefinitionSpec | null>(null);
 
   const running = workflows.filter((w) => w.status === "running").length;
   const pending = workflows.filter((w) => w.status === "awaiting_approval").length;
@@ -102,10 +106,19 @@ function Workflows() {
         <div className="mb-6 space-y-3">
           <h2 className="text-sm font-semibold text-foreground">Workflow templates</h2>
           {templates.map((d) => (
-            <TemplateCard key={d.workflow_key} def={d} />
+            <TemplateCard key={d.workflow_key} def={d} onPreview={() => setActiveTemplate(d)} />
           ))}
         </div>
       )}
+
+      {/* One slide-in preview panel for the templates section. */}
+      <WorkflowPreview
+        def={activeTemplate}
+        open={activeTemplate !== null}
+        onOpenChange={(o) => {
+          if (!o) setActiveTemplate(null);
+        }}
+      />
 
       {/* KPI tiles */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -253,10 +266,15 @@ function MyWorkflowCard({ def }: { def: WorkflowDefinitionSpec }) {
 
 /* ─────────────────────────  Template card  ───────────────────────── */
 
-function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
+function TemplateCard({
+  def,
+  onPreview,
+}: {
+  def: WorkflowDefinitionSpec;
+  onPreview: () => void;
+}) {
   const navigate = useNavigate();
   const start = useStartWorkflow();
-  const [open, setOpen] = useState(false);
 
   const onRun = () =>
     start.mutate(
@@ -272,21 +290,15 @@ function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
     );
 
   return (
-    <>
-      {/* Click the card to open the expanded flow view; the Run button stops propagation. */}
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen(true);
-          }
-        }}
-        className="group cursor-pointer rounded-xl outline-none ring-offset-2 ring-offset-background transition focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        <div className="mb-1 flex flex-wrap items-center gap-2">
+    <div className="group flex items-start gap-3 rounded-xl border border-border bg-card p-4 transition hover:border-primary/50 hover:shadow-sm">
+      {/* Workflow icon */}
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">
+        <WorkflowIcon className="h-4 w-4" />
+      </span>
+
+      {/* Name + one-line description */}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-semibold text-foreground transition group-hover:text-primary">
             {def.name}
           </h3>
@@ -295,35 +307,37 @@ function TemplateCard({ def }: { def: WorkflowDefinitionSpec }) {
               {def.latest_status}
             </span>
           )}
-          <span className="hidden text-[11px] text-muted-foreground group-hover:inline">
-            Click to expand
-          </span>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRun();
-            }}
-            disabled={start.isPending}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
-          >
-            {start.isPending ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            {start.isPending ? "Starting…" : "Run"}
-          </button>
         </div>
         {def.description && (
-          <p className="mb-2 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+          <p className="mt-0.5 line-clamp-1 text-xs leading-relaxed text-muted-foreground">
             {def.description}
           </p>
         )}
-        <WorkflowFlow def={def} />
       </div>
 
-      <WorkflowDialog def={def} open={open} onOpenChange={setOpen} />
-    </>
+      {/* Actions — Preview opens the slide-in panel; Run starts the workflow. */}
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          onClick={onPreview}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1 text-xs font-medium text-muted-foreground transition hover:text-foreground"
+        >
+          <Eye className="h-3.5 w-3.5" />
+          Preview
+        </button>
+        <button
+          onClick={onRun}
+          disabled={start.isPending}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-primary/40 bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary transition hover:bg-primary/20 disabled:opacity-60"
+        >
+          {start.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Play className="h-3.5 w-3.5" />
+          )}
+          {start.isPending ? "Starting…" : "Run"}
+        </button>
+      </div>
+    </div>
   );
 }
 
